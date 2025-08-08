@@ -42,42 +42,103 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _fetchWeatherForCurrentLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
+    try {
+      bool serviceEnabled;
+      LocationPermission permission;
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Location services are disabled')),
+        );
         return;
       }
+
+      permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Location permission denied')),
+          );
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location permission permanently denied'),
+          ),
+        );
+        return;
+      }
+
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      // Try multiple fields to get a valid city name
+      String? cityName =
+          placemarks.first.locality ??
+          placemarks.first.subAdministrativeArea ??
+          placemarks.first.administrativeArea;
+
+      if (cityName == null || cityName.isEmpty || cityName == "Unknown") {
+        // Fallback: use coordinates directly
+        _wf
+            .currentWeatherByLocation(position.latitude, position.longitude)
+            .then((w) {
+              setState(() {
+                _weather = w;
+              });
+            })
+            .catchError((e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Failed to fetch weather data')),
+              );
+            });
+      } else {
+        _wf
+            .currentWeatherByCityName(cityName)
+            .then((w) {
+              setState(() {
+                _weather = w;
+              });
+            })
+            .catchError((e) {
+              // If city name fails, try coordinates as fallback
+              _wf
+                  .currentWeatherByLocation(
+                    position.latitude,
+                    position.longitude,
+                  )
+                  .then((w) {
+                    setState(() {
+                      _weather = w;
+                    });
+                  })
+                  .catchError((e2) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Failed to fetch weather data'),
+                      ),
+                    );
+                  });
+            });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('An error occurred while getting location'),
+        ),
+      );
     }
-
-    if (permission == LocationPermission.deniedForever) {
-      return;
-    }
-
-    Position position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
-
-    List<Placemark> placemarks = await placemarkFromCoordinates(
-      position.latitude,
-      position.longitude,
-    );
-
-    String cityName = placemarks.first.locality ?? "Unknown";
-
-    _wf.currentWeatherByCityName(cityName).then((w) {
-      setState(() {
-        _weather = w;
-      });
-    });
   }
 
   @override
